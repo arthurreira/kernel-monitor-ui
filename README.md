@@ -1,4 +1,4 @@
-# 🔍 Kernel Monitor UI
+#  Kernel Monitor UI
 
 > Ask your Linux kernel what it's doing — in plain English.
 
