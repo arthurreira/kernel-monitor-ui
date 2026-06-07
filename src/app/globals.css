@@ -117,6 +117,32 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ── Kernel Monitor theme tokens — backed by shadcn tokens ── */
+:root {
+  --km-bg: var(--background);
+  --km-surface: var(--card);
+  --km-border: var(--border);
+  --km-row-sep: var(--border);
+  --km-text: var(--foreground);
+  --km-text-2: var(--muted-foreground);
+  --km-text-3: var(--muted-foreground);
+  --km-text-dim: var(--muted-foreground);
+  --km-text-faint: var(--muted-foreground);
+  --km-user-bg: var(--muted);
+  /* domain-specific */
+  --km-ai-bg: #fff1f2;
+  --km-alert-row: rgba(220, 38, 38, 0.07);
+  --km-green: #16a34a;
+  --km-green-dot: #15803d;
+}
+
+.dark {
+  --km-ai-bg: #0c0404;
+  --km-alert-row: rgba(220, 38, 38, 0.12);
+  --km-green: #4ade80;
+  --km-green-dot: #16a34a;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

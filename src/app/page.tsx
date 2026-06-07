@@ -1,7 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useTheme } from 'next-themes'
+import { Warning, RadioButton } from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 const API = 'http://172.20.10.2:8000'
@@ -19,6 +23,14 @@ interface KernelStats {
   top_process: string
   suspicious: number
   uptime: string
+}
+
+interface Health {
+  cpu: number
+  ram_used: number
+  ram_total: number
+  model: string
+  backend: string
 }
 
 interface Message {
@@ -63,28 +75,44 @@ function StatBlock({
       style={{
         flex: 1,
         padding: '14px 24px',
-        borderRight: noBorder ? 'none' : '1px solid #1f1f1f',
-        fontFamily: 'system-ui, sans-serif',
+        borderRight: noBorder ? 'none' : '1px solid var(--km-border)',
       }}
     >
-      <div style={{ fontSize: 9, color: '#6b7280', letterSpacing: '0.12em', marginBottom: 6, textTransform: 'uppercase' }}>
+      <div style={{ fontSize: 9, color: 'var(--km-text-3)', letterSpacing: '0.12em', marginBottom: 6, textTransform: 'uppercase' }}>
         {label}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: red ? '#dc2626' : '#f9fafb', lineHeight: 1.1, marginBottom: 3 }}>
+      <div style={{ fontSize: 26, fontWeight: 700, color: red ? '#dc2626' : 'var(--km-text)', lineHeight: 1.1, marginBottom: 3 }}>
         {value}
       </div>
-      <div style={{ fontSize: 11, color: '#6b7280' }}>{sub}</div>
+      <div style={{ fontSize: 11, color: 'var(--km-text-3)' }}>{sub}</div>
     </div>
   )
 }
 
 export default function KernelMonitor() {
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
   const [events, setEvents] = useState<KernelEvent[]>([])
   const [stats, setStats] = useState<KernelStats | null>(null)
+  const [health, setHealth] = useState<Health | null>(null)
+  const [processFilter, setProcessFilter] = useState('')
+  const [fileFilter, setFileFilter] = useState('')
+  const [suspiciousOnly, setSuspiciousOnly] = useState(false)
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE])
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [selectedRow, setSelectedRow] = useState<number | null>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => setMounted(true), [])
+
+  const filteredEvents = events.filter(ev => {
+    if (suspiciousOnly && !isSensitive(ev.filename)) return false
+    if (processFilter && !ev.process?.toLowerCase().includes(processFilter.toLowerCase())) return false
+    if (fileFilter && !ev.filename?.toLowerCase().includes(fileFilter.toLowerCase())) return false
+    return true
+  })
 
   useEffect(() => {
     const poll = async () => {
@@ -101,6 +129,20 @@ export default function KernelMonitor() {
     }
     poll()
     const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const pollHealth = async () => {
+      try {
+        const data = await fetch(`${API}/health`).then(r => r.json())
+        setHealth(data)
+      } catch {
+        // retain last known health
+      }
+    }
+    pollHealth()
+    const interval = setInterval(pollHealth, 5000)
     return () => clearInterval(interval)
   }, [])
 
@@ -132,80 +174,75 @@ export default function KernelMonitor() {
     }
   }
 
+  const investigateRow = (ev: KernelEvent, idx: number) => {
+    setSelectedRow(idx)
+    send(`What is ${ev.process} doing with ${ev.filename ?? 'unknown file'}?`)
+  }
+
+  const isDark = theme === 'dark'
+
   return (
     <div
       style={{
         height: '100vh',
         width: '100vw',
-        background: '#0a0a0a',
-        color: '#f9fafb',
+        background: 'var(--km-bg)',
+        color: 'var(--km-text)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        fontFamily: 'system-ui, sans-serif',
       }}
     >
       {/* ── TOP BAR ── */}
-      <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid #1f1f1f', flexShrink: 0 }}>
-        {/* Wordmark */}
+      <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--km-border)', flexShrink: 0 }}>
+        {/* Wordmark + theme toggle */}
         <div
           style={{
             padding: '12px 24px',
-            borderRight: '1px solid #1f1f1f',
+            borderRight: '1px solid var(--km-border)',
             minWidth: 170,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
+            gap: 4,
           }}
         >
-          <div style={{ fontSize: 9, color: '#6b7280', letterSpacing: '0.12em', marginBottom: 5 }}>
+          <div style={{ fontSize: 9, color: 'var(--km-text-3)', letterSpacing: '0.12em' }}>
             EBPF · SYSCALL TRACE
           </div>
-          <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1.15 }}>
-            KERNEL
-            <br />
-            MONITOR
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1.15 }}>
+              KERNEL
+              <br />
+              MONITOR
+            </div>
+            {mounted && (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                style={{ marginBottom: 2, fontSize: 14 }}
+              >
+                {isDark ? '☀' : '●'}
+              </Button>
+            )}
           </div>
         </div>
 
         {/* Stats */}
-        <StatBlock
-          label="Events Today"
-          value={stats?.total?.toLocaleString() ?? '—'}
-          sub="total syscalls traced"
-        />
-        <StatBlock
-          label="Most Active Process"
-          value={stats?.top_process ?? '—'}
-          sub="highest file open rate"
-        />
-        <StatBlock
-          label="Suspicious Events"
-          value={stats?.suspicious?.toLocaleString() ?? '—'}
-          sub="sensitive path access"
-          red
-        />
-        <StatBlock
-          label="System Uptime"
-          value={stats?.uptime ? formatUptime(stats.uptime) : '—'}
-          sub={stats?.uptime ?? ''}
-          noBorder
-        />
+        <StatBlock label="Events Today" value={stats?.total?.toLocaleString() ?? '—'} sub="total syscalls traced" />
+        <StatBlock label="Most Active Process" value={stats?.top_process ?? '—'} sub="highest file open rate" />
+        <StatBlock label="Suspicious Events" value={stats?.suspicious?.toLocaleString() ?? '—'} sub="sensitive path access" red />
+        <StatBlock label="System Uptime" value={stats?.uptime ? formatUptime(stats.uptime) : '—'} sub={stats?.uptime ?? ''} noBorder />
       </div>
 
       {/* ── MAIN PANELS ── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── LEFT: EVENT FEED (40%) ── */}
-        <div
-          style={{
-            width: '40%',
-            display: 'flex',
-            flexDirection: 'column',
-            borderRight: '1px solid #1f1f1f',
-            overflow: 'hidden',
-          }}
-        >
+        <div style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--km-border)', overflow: 'hidden' }}>
+
           {/* Feed header */}
           <div
             style={{
@@ -213,43 +250,73 @@ export default function KernelMonitor() {
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '7px 16px',
-              borderBottom: '1px solid #1f1f1f',
+              borderBottom: '1px solid var(--km-border)',
               flexShrink: 0,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
               <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <span
+                <RadioButton
                   className="animate-ping"
-                  style={{
-                    position: 'absolute',
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: '#dc2626',
-                    opacity: 0.75,
-                  }}
+                  size={12}
+                  weight="fill"
+                  color="#dc2626"
+                  style={{ position: 'absolute', opacity: 0.6 }}
                 />
-                <span
-                  style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', position: 'relative', flexShrink: 0 }}
-                />
+                <RadioButton size={12} weight="fill" color="#dc2626" style={{ position: 'relative', flexShrink: 0 }} />
               </span>
               <span style={{ color: '#dc2626', fontWeight: 700, letterSpacing: '0.08em' }}>LIVE</span>
-              <span style={{ color: '#374151', margin: '0 1px' }}>/</span>
-              <span style={{ color: '#9ca3af', letterSpacing: '0.05em' }}>EVENT FEED</span>
+              <span style={{ color: 'var(--km-text-dim)', margin: '0 1px' }}>/</span>
+              <span style={{ color: 'var(--km-text-2)', letterSpacing: '0.05em' }}>EVENT FEED</span>
             </div>
             <Badge
               variant="outline"
               style={{
                 fontSize: 10,
-                color: '#6b7280',
-                borderColor: '#1f1f1f',
-                background: '#111111',
+                color: 'var(--km-text-3)',
+                borderColor: 'var(--km-border)',
+                background: 'var(--km-surface)',
                 fontFamily: 'var(--font-mono), "JetBrains Mono", monospace',
               }}
             >
-              {events.length} events
+              {filteredEvents.length} events
             </Badge>
+          </div>
+
+          {/* Filter bar */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 16px',
+              borderBottom: '1px solid var(--km-border)',
+              flexShrink: 0,
+            }}
+          >
+            <Input
+              value={processFilter}
+              onChange={e => setProcessFilter(e.target.value)}
+              placeholder="filter by process..."
+              className="font-mono text-[11px] h-7"
+              style={{ caretColor: '#dc2626' }}
+            />
+            <Input
+              value={fileFilter}
+              onChange={e => setFileFilter(e.target.value)}
+              placeholder="filter by file..."
+              className="font-mono text-[11px] h-7"
+              style={{ caretColor: '#dc2626' }}
+            />
+            <Button
+              variant={suspiciousOnly ? 'destructive' : 'outline'}
+              size="sm"
+              onClick={() => setSuspiciousOnly(v => !v)}
+              className="shrink-0 text-[10px] font-bold tracking-wide"
+            >
+              <Warning size={12} weight="fill" />
+              suspicious
+            </Button>
           </div>
 
           {/* Column headers */}
@@ -258,43 +325,49 @@ export default function KernelMonitor() {
               display: 'grid',
               gridTemplateColumns: '180px 160px 1fr',
               padding: '5px 16px',
-              borderBottom: '1px solid #1f1f1f',
+              borderBottom: '1px solid var(--km-border)',
               flexShrink: 0,
             }}
           >
             {(['TIMESTAMP', 'PROCESS', 'FILE'] as const).map(h => (
-              <span key={h} style={{ fontSize: 9, color: '#4b5563', letterSpacing: '0.1em' }}>
-                {h}
-              </span>
+              <span key={h} style={{ fontSize: 9, color: 'var(--km-text-faint)', letterSpacing: '0.1em' }}>{h}</span>
             ))}
           </div>
 
           {/* Scrollable event rows */}
           <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
             <ScrollArea className="h-full">
-              {events.map((ev, i) => {
+              {filteredEvents.map((ev, i) => {
                 const alert = isSensitive(ev.filename)
+                const isSelected = selectedRow === i
                 return (
                   <div
                     key={i}
+                    onClick={() => investigateRow(ev, i)}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '180px 160px 1fr',
                       padding: '3px 16px',
-                      background: alert ? 'rgba(220,38,38,0.10)' : 'transparent',
-                      borderBottom: '1px solid #0f0f0f',
+                      background: isSelected
+                        ? 'rgba(245, 158, 11, 0.08)'
+                        : alert
+                        ? 'var(--km-alert-row)'
+                        : 'transparent',
+                      borderBottom: '1px solid var(--km-row-sep)',
+                      borderLeft: isSelected ? '2px solid #f59e0b' : '2px solid transparent',
                       fontFamily: 'var(--font-mono), "JetBrains Mono", monospace',
                       fontSize: 11,
                       alignItems: 'center',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
+                      cursor: 'pointer',
                     }}
                   >
-                    <span style={{ color: alert ? '#f87171' : '#6b7280' }}>{ev.timestamp}</span>
-                    <span style={{ color: alert ? '#fca5a5' : '#f9fafb', fontWeight: alert ? 600 : 400 }}>
+                    <span style={{ color: alert ? '#f87171' : 'var(--km-text-3)' }}>{ev.timestamp}</span>
+                    <span style={{ color: alert ? '#fca5a5' : 'var(--km-text)', fontWeight: alert ? 600 : 400 }}>
                       {ev.process}[{ev.pid}]
                     </span>
-                    <span style={{ color: alert ? '#f87171' : '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: alert ? '#f87171' : 'var(--km-text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
                       {alert && <span style={{ color: '#dc2626', fontWeight: 700 }}>!</span>}
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.filename ?? ''}</span>
                     </span>
@@ -307,35 +380,39 @@ export default function KernelMonitor() {
 
         {/* ── RIGHT: AI CHAT (60%) ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
           {/* Chat header */}
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
               padding: '10px 20px',
-              borderBottom: '1px solid #1f1f1f',
+              borderBottom: '1px solid var(--km-border)',
               flexShrink: 0,
+              gap: 5,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>Kernel Assistant</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#4ade80' }}>
-                <span
-                  style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block', flexShrink: 0 }}
-                />
-                monitoring active
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>Kernel Assistant</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--km-green)' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--km-green-dot)', display: 'inline-block', flexShrink: 0 }} />
+                  monitoring active
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', fontFamily: 'var(--font-mono), "JetBrains Mono", monospace', lineHeight: 1.5 }}>
+                <div style={{ fontSize: 11, color: 'var(--km-text-3)' }}>kernel-sentinel</div>
+                {health && (
+                  <div style={{ fontSize: 10, color: '#6b7280' }}>{health.model} · local</div>
+                )}
               </div>
             </div>
-            <span
-              style={{
-                fontFamily: 'var(--font-mono), "JetBrains Mono", monospace',
-                fontSize: 11,
-                color: '#6b7280',
-              }}
-            >
-              claude-sentinel
-            </span>
+
+            {health && (
+              <div style={{ fontFamily: 'var(--font-mono), "JetBrains Mono", monospace', fontSize: 11, color: 'var(--km-text-3)', lineHeight: 1.4 }}>
+                CPU: {health.cpu}% · RAM: {health.ram_used} / {health.ram_total}GB · {health.model} · {health.backend}
+              </div>
+            )}
           </div>
 
           {/* Message area */}
@@ -345,41 +422,16 @@ export default function KernelMonitor() {
                 {messages.map((msg, i) =>
                   msg.role === 'ai' ? (
                     <div key={i} style={{ alignSelf: 'flex-start', maxWidth: '82%' }}>
-                      <div
-                        style={{
-                          border: '1px solid #dc2626',
-                          background: '#0c0404',
-                          padding: '12px 16px',
-                          fontSize: 13,
-                          lineHeight: 1.65,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 9,
-                            color: '#dc2626',
-                            fontWeight: 700,
-                            letterSpacing: '0.14em',
-                            marginBottom: 8,
-                          }}
-                        >
+                      <div style={{ border: '1px solid #dc2626', background: 'var(--km-ai-bg)', padding: '12px 16px', fontSize: 13, lineHeight: 1.65 }}>
+                        <div style={{ fontSize: 9, color: '#dc2626', fontWeight: 700, letterSpacing: '0.14em', marginBottom: 8 }}>
                           KERNEL ASSISTANT
                         </div>
-                        <div style={{ whiteSpace: 'pre-wrap', color: '#f9fafb' }}>{msg.text}</div>
+                        <div style={{ whiteSpace: 'pre-wrap', color: 'var(--km-text)' }}>{msg.text}</div>
                       </div>
                     </div>
                   ) : (
                     <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '70%' }}>
-                      <div
-                        style={{
-                          background: '#111111',
-                          border: '1px solid #1f1f1f',
-                          padding: '8px 14px',
-                          fontSize: 13,
-                          lineHeight: 1.55,
-                          color: '#f9fafb',
-                        }}
-                      >
+                      <div style={{ background: 'var(--km-user-bg)', border: '1px solid var(--km-border)', padding: '8px 14px', fontSize: 13, lineHeight: 1.55, color: 'var(--km-text)' }}>
                         {msg.text}
                       </div>
                     </div>
@@ -388,18 +440,9 @@ export default function KernelMonitor() {
 
                 {loading && (
                   <div style={{ alignSelf: 'flex-start', maxWidth: '82%' }}>
-                    <div
-                      style={{
-                        border: '1px solid #dc2626',
-                        background: '#0c0404',
-                        padding: '12px 16px',
-                        fontSize: 13,
-                      }}
-                    >
-                      <div style={{ fontSize: 9, color: '#dc2626', fontWeight: 700, letterSpacing: '0.14em', marginBottom: 8 }}>
-                        KERNEL ASSISTANT
-                      </div>
-                      <div style={{ color: '#6b7280' }}>processing…</div>
+                    <div style={{ border: '1px solid #dc2626', background: 'var(--km-ai-bg)', padding: '12px 16px', fontSize: 13 }}>
+                      <div style={{ fontSize: 9, color: '#dc2626', fontWeight: 700, letterSpacing: '0.14em', marginBottom: 8 }}>KERNEL ASSISTANT</div>
+                      <div style={{ color: 'var(--km-text-3)' }}>processing…</div>
                     </div>
                   </div>
                 )}
@@ -410,91 +453,41 @@ export default function KernelMonitor() {
           </div>
 
           {/* Input bar */}
-          <div
-            style={{
-              padding: '12px 20px',
-              borderTop: '1px solid #1f1f1f',
-              flexShrink: 0,
-              background: '#0a0a0a',
-            }}
-          >
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--km-border)', flexShrink: 0, background: 'var(--km-bg)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span
-                style={{
-                  color: '#dc2626',
-                  fontFamily: 'var(--font-mono), "JetBrains Mono", monospace',
-                  fontSize: 14,
-                  flexShrink: 0,
-                  userSelect: 'none',
-                }}
-              >
+              <span style={{ color: '#dc2626', fontFamily: 'var(--font-mono), "JetBrains Mono", monospace', fontSize: 14, flexShrink: 0, userSelect: 'none' }}>
                 &gt;
               </span>
-              <input
+              <Input
                 value={question}
-                onChange={e => setQuestion(e.target.value)}
+                onChange={e => { setQuestion(e.target.value); setSelectedRow(null) }}
                 onKeyDown={e => e.key === 'Enter' && send()}
                 placeholder="ask your kernel..."
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: '#f9fafb',
-                  fontFamily: 'var(--font-mono), "JetBrains Mono", monospace',
-                  fontSize: 13,
-                  caretColor: '#dc2626',
-                  minWidth: 0,
-                }}
+                className="font-mono text-[13px] border-none bg-transparent focus-visible:ring-0 focus-visible:border-0 h-8 px-0"
+                style={{ caretColor: '#dc2626' }}
               />
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => send()}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #1f1f1f',
-                  color: '#9ca3af',
-                  fontFamily: 'system-ui, sans-serif',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  padding: '5px 14px',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  height: 32,
-                }}
+                className="shrink-0 font-bold tracking-wide text-[10px]"
               >
                 SEND ↵
-              </button>
+              </Button>
             </div>
 
-            <div style={{ fontSize: 11, color: '#374151' }}>
+            <div style={{ fontSize: 11, color: 'var(--km-text-dim)' }}>
               Try:{' '}
               <button
                 onClick={() => send('who touched /etc/passwd?')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#6b7280',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  padding: 0,
-                  fontFamily: 'inherit',
-                }}
+                style={{ background: 'none', border: 'none', color: 'var(--km-text-3)', cursor: 'pointer', fontSize: 11, padding: 0, fontFamily: 'inherit' }}
               >
                 &quot;who touched /etc/passwd?&quot;
               </button>
               {' · '}
               <button
                 onClick={() => send('what is unknown_4471 doing?')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#6b7280',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  padding: 0,
-                  fontFamily: 'inherit',
-                }}
+                style={{ background: 'none', border: 'none', color: 'var(--km-text-3)', cursor: 'pointer', fontSize: 11, padding: 0, fontFamily: 'inherit' }}
               >
                 &quot;what is unknown_4471 doing?&quot;
               </button>
